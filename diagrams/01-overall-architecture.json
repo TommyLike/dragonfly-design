@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "模型存储与下载加速总体架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [1370, 780]
+  },
+  "components": [
+    { "id": "git-client", "type": "external", "label": "Git Client / hub SDK", "sublabel": "lfs + multipart", "pos": [40, 80], "size": [150, 60] },
+    { "id": "gitea", "type": "backend", "label": "Gitea（改造）", "sublabel": "Batch / verify / objects/urls", "pos": [40, 300], "size": [170, 60] },
+    { "id": "obs", "type": "cloud", "label": "华为云 OBS", "sublabel": "对象存储 + multipart", "pos": [470, 460], "size": [150, 60] },
+    { "id": "cdn", "type": "cloud", "label": "华为云 CDN", "sublabel": "URL 鉴权（方式 A）", "pos": [470, 640], "size": [150, 60] },
+    { "id": "manager", "type": "backend", "label": "Dragonfly Manager", "sublabel": "调度管理 / Preheat API", "pos": [770, 60], "size": [160, 60] },
+    { "id": "scheduler", "type": "backend", "label": "Dragonfly Scheduler", "sublabel": "P2P 调度 / DAG", "pos": [960, 60], "size": [160, 60] },
+    { "id": "mysql", "type": "database", "label": "MySQL", "sublabel": "manager 元数据", "pos": [770, 280], "size": [160, 60] },
+    { "id": "seed-peer", "type": "backend", "label": "Seed Peer", "sublabel": "回源根节点（super）", "pos": [1180, 280], "size": [140, 60] },
+    { "id": "redis", "type": "database", "label": "Redis", "sublabel": "broker / backend", "pos": [1180, 60], "size": [140, 60] },
+    { "id": "peer", "type": "backend", "label": "Peer（dfdaemon）", "sublabel": "代理 + 缓存 + P2P", "pos": [955, 520], "size": [170, 60] },
+    { "id": "space-pods", "type": "backend", "label": "Space 实例", "sublabel": "CCE / CCI 业务 Pod", "pos": [640, 520], "size": [160, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "华为云", "wraps": ["obs", "cdn"], "pad": 20 },
+    { "kind": "region", "label": "Dragonfly 管理集群（独立子网）", "wraps": ["manager", "scheduler", "seed-peer", "redis", "mysql"], "pad": 20 },
+    { "kind": "region", "label": "业务集群（CCE / CCI）", "wraps": ["peer", "space-pods"], "pad": 20 }
+  ],
+  "connections": [
+    { "from": "git-client", "to": "gitea", "label": "Batch API（multipart/basic）", "fromSide": "bottom", "toSide": "top" },
+    { "from": "git-client", "to": "obs", "label": "分片 PUT 直传", "variant": "emphasis", "fromSide": "top", "toSide": "top" },
+    { "from": "gitea", "to": "obs", "label": "init / list / complete", "fromSide": "right", "toSide": "left" },
+    { "from": "gitea", "to": "cdn", "label": "签名 URL 改写域名", "fromSide": "bottom", "toSide": "left" },
+    { "from": "cdn", "to": "obs", "label": "未命中回源", "variant": "dashed" },
+    { "from": "space-pods", "to": "peer", "label": "LFS 下载（代理）", "variant": "emphasis", "labelAt": [900, 594] },
+    { "from": "peer", "to": "scheduler", "label": "注册 / 任务调度", "fromSide": "top", "toSide": "bottom" },
+    { "from": "peer", "to": "seed-peer", "label": "P2P 分片互传", "fromSide": "bottom", "toSide": "bottom", "via": [[1040, 640], [1250, 640]] },
+    { "from": "seed-peer", "to": "cdn", "label": "回源下载（CDN URL）", "fromSide": "right", "toSide": "right", "via": [[1345, 310], [1345, 670]] },
+    { "from": "manager", "to": "scheduler", "label": "集群 / 任务管理", "labelAt": [945, 138] },
+    { "from": "scheduler", "to": "redis", "label": "broker / backend", "labelAt": [1150, 130] }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "两条链路", "items": ["上传：Gitea 返回分片签名 URL，客户端直传 OBS，服务端零中转", "下载：集群内经 Peer 代理走 P2P；集群外用户走 CDN 直链"] },
+    { "dot": "cyan", "title": "管理面与数据面分离", "items": ["管理集群独立子网部署（ELB / SNAT / 双实例）", "Peer 跟随业务集群部署，就近代理缓存"] },
+    { "dot": "emerald", "title": "预热结合点", "items": ["Gitea /objects/urls 提供对象直链清单", "Manager Preheat API 在模型发布后主动缓存（见预热时序）"] }
+  ]
+}

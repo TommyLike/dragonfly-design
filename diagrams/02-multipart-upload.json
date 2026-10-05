@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "模型上传时序（multipart）",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [1390, 660]
+  },
+  "participants": [
+    { "id": "client", "type": "external", "label": "Git Client" },
+    { "id": "gitea", "type": "backend", "label": "Gitea" },
+    { "id": "obs", "type": "cloud", "label": "华为云 OBS" },
+    { "id": "db", "type": "database", "label": "MySQL" }
+  ],
+  "segments": [
+    { "from": 160, "to": 286, "label": "Batch 协商与续传状态" },
+    { "from": 298, "to": 318, "label": "分片直传" },
+    { "from": 328, "to": 478, "label": "verify 即 commit" },
+    { "from": 488, "to": 540, "label": "元数据入库" },
+    { "from": 548, "to": 575, "label": "取消（可选）" }
+  ],
+  "messages": [
+    { "from": "client", "to": "gitea", "y": 180, "label": "POST /objects/batch {operation: upload, transfers: [basic, multipart]}", "variant": "emphasis" },
+    { "from": "gitea", "to": "obs", "y": 210, "label": "查询任务状态 / 初始化（List / ListParts / Initiate）" },
+    { "from": "obs", "to": "gitea", "y": 240, "label": "uploadId + 已传分片 etag", "variant": "return" },
+    { "from": "gitea", "to": "client", "y": 270, "label": "200 {transfer: multipart, parts[], verify, abort}", "variant": "emphasis" },
+    { "from": "client", "to": "obs", "y": 308, "label": "并行 PUT 各分片（签名 URL 直传）", "variant": "emphasis", "note": "跳过已传分片（断点续传）；不经过 Gitea 服务端" },
+    { "from": "client", "to": "gitea", "y": 336, "label": "POST /info/lfs/multipart-verify?oid&size", "variant": "emphasis", "note": "body 携带 {upload_id, part_ids: [{etag, part_id}]}" },
+    { "from": "gitea", "to": "obs", "y": 366, "label": "CompleteMultipartUpload(parts)", "variant": "emphasis" },
+    { "from": "obs", "to": "gitea", "y": 396, "label": "合并完成", "variant": "return" },
+    { "from": "gitea", "to": "obs", "y": 426, "label": "Stat 校验 size" },
+    { "from": "obs", "to": "gitea", "y": 456, "label": "size OK", "variant": "return" },
+    { "from": "gitea", "to": "db", "y": 498, "label": "写入 LFSMetaObject" },
+    { "from": "gitea", "to": "client", "y": 528, "label": "200 OK", "variant": "return" },
+    { "from": "client", "to": "gitea", "y": 558, "label": "DELETE multipart-abort（失败取消）", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "gitea", "from": 174, "to": 286, "type": "backend" },
+    { "participant": "obs", "from": 204, "to": 246, "type": "cloud" },
+    { "participant": "client", "from": 174, "to": 316, "type": "external" },
+    { "participant": "client", "from": 330, "to": 564, "type": "external" },
+    { "participant": "gitea", "from": 330, "to": 536, "type": "backend" },
+    { "participant": "obs", "from": 360, "to": 402, "type": "cloud" },
+    { "participant": "obs", "from": 420, "to": 462, "type": "cloud" },
+    { "participant": "db", "from": 492, "to": 524, "type": "database" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "直传与续传", "items": ["分片 PUT 直传 OBS，服务端零文件流转发", "已传分片随 batch 响应返回 etag，客户端自动跳过"] },
+    { "dot": "emerald", "title": "verify 即 commit", "items": ["客户端透传每段 etag + part_id，服务端合并校验", "合并后 Stat 校验大小，再写 LFS 元数据"] }
+  ]
+}

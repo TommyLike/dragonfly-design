@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "集群内 P2P 下载时序",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [1390, 660]
+  },
+  "participants": [
+    { "id": "space", "type": "backend", "label": "Space Pod" },
+    { "id": "peer", "type": "backend", "label": "Peer" },
+    { "id": "scheduler", "type": "backend", "label": "Scheduler" },
+    { "id": "seed", "type": "backend", "label": "Seed Peer" },
+    { "id": "cdn", "type": "cloud", "label": "CDN" },
+    { "id": "neighbor", "type": "backend", "label": "邻居 Peer" }
+  ],
+  "segments": [
+    { "from": 160, "to": 286, "label": "接入与调度" },
+    { "from": 296, "to": 376, "label": "回源下载" },
+    { "from": 382, "to": 462, "label": "P2P 分发" },
+    { "from": 470, "to": 508, "label": "交付" }
+  ],
+  "messages": [
+    { "from": "space", "to": "peer", "y": 180, "label": "GET LFS 对象（经代理端口）", "variant": "emphasis", "note": "命中本地缓存时直接返回，不参与调度" },
+    { "from": "peer", "to": "scheduler", "y": 210, "label": "注册 + 任务调度请求", "variant": "emphasis" },
+    { "from": "scheduler", "to": "peer", "y": 240, "label": "返回父节点（DAG / 最优选择）", "variant": "return" },
+    { "from": "peer", "to": "seed", "y": 300, "label": "请求分片（本地未命中）" },
+    { "from": "seed", "to": "cdn", "y": 330, "label": "回源下载（签名 URL，Range 并发）", "note": "8 goroutine 并发分片拉取" },
+    { "from": "cdn", "to": "seed", "y": 360, "label": "分片数据", "variant": "return" },
+    { "from": "seed", "to": "peer", "y": 390, "label": "P2P 分片传输", "variant": "emphasis" },
+    { "from": "peer", "to": "neighbor", "y": 420, "label": "节点间分片互传", "variant": "dashed" },
+    { "from": "neighbor", "to": "peer", "y": 450, "label": "分片交换", "variant": "dashed" },
+    { "from": "peer", "to": "space", "y": 480, "label": "文件落盘 + digest 校验", "variant": "emphasis" }
+  ],
+  "activations": [
+    { "participant": "space", "from": 174, "to": 216, "type": "backend" },
+    { "participant": "peer", "from": 174, "to": 286, "type": "backend" },
+    { "participant": "scheduler", "from": 204, "to": 246, "type": "backend" },
+    { "participant": "peer", "from": 294, "to": 490, "type": "backend" },
+    { "participant": "seed", "from": 294, "to": 400, "type": "backend" },
+    { "participant": "cdn", "from": 324, "to": 366, "type": "cloud" },
+    { "participant": "neighbor", "from": 414, "to": 456, "type": "backend" },
+    { "participant": "space", "from": 474, "to": 490, "type": "backend" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "调度与加速", "items": ["Scheduler 构建下载 DAG，为节点选择最优父节点", "回源收敛到 Seed Peer，其余节点走 P2P 分片互传"] },
+    { "dot": "emerald", "title": "对业务无感", "items": ["Space Pod 仅需将 LFS 下载指向 Peer 代理端口", "命中缓存时直接返回，不触发调度与回源"] }
+  ]
+}

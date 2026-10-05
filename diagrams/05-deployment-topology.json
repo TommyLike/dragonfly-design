@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Dragonfly 生产部署拓扑",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [1390, 720]
+  },
+  "components": [
+    { "id": "elb", "type": "cloud", "label": "ELB", "sublabel": "Manager 负载均衡", "pos": [50, 310], "size": [120, 60] },
+    { "id": "snat", "type": "cloud", "label": "SNAT 网关", "sublabel": "独立出网", "pos": [50, 480], "size": [120, 60] },
+    { "id": "manager", "type": "backend", "label": "Manager ×2", "sublabel": "4C8G · :65003/:8080", "pos": [280, 80], "size": [160, 60] },
+    { "id": "scheduler", "type": "backend", "label": "Scheduler ×2", "sublabel": "4C8G · :8002", "pos": [280, 290], "size": [160, 60] },
+    { "id": "seed", "type": "backend", "label": "Seed Peer ×2", "sublabel": "4C8G · 10T SSD", "pos": [280, 500], "size": [160, 60] },
+    { "id": "mysql", "type": "database", "label": "MySQL", "sublabel": "白名单 + 认证", "pos": [560, 290], "size": [140, 60] },
+    { "id": "redis", "type": "database", "label": "Redis", "sublabel": "3 DB · 白名单 + 认证", "pos": [560, 500], "size": [140, 60] },
+    { "id": "space-cce", "type": "backend", "label": "Space Pods（CCE）", "sublabel": "就近代理", "pos": [940, 80], "size": [170, 60] },
+    { "id": "peer-cce", "type": "backend", "label": "Peer（DaemonSet）", "sublabel": "每节点 · hostPath", "pos": [940, 290], "size": [170, 60] },
+    { "id": "space-cci", "type": "backend", "label": "Space Pods（CCI）", "sublabel": "统一 Service", "pos": [1220, 80], "size": [140, 60] },
+    { "id": "peer-cci", "type": "backend", "label": "Peer ×5（Deployment）", "sublabel": "独立 PVC · ELB", "pos": [1220, 290], "size": [140, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "管理集群（VPC 子网 A）", "wraps": ["manager", "scheduler", "seed", "mysql", "redis"], "pad": 20 },
+    { "kind": "region", "label": "CCE 集群", "wraps": ["space-cce", "peer-cce"], "pad": 20 },
+    { "kind": "region", "label": "CCI 集群", "wraps": ["space-cci", "peer-cci"], "pad": 20 }
+  ],
+  "connections": [
+    { "from": "elb", "to": "manager", "label": "65003 / 8080", "fromSide": "right", "toSide": "left", "via": [[230, 340], [230, 110]] },
+    { "from": "manager", "to": "scheduler", "label": "集群 / 任务管理", "fromSide": "bottom", "toSide": "top", "labelAt": [360, 154] },
+    { "from": "manager", "to": "mysql", "label": "元数据", "fromSide": "right", "toSide": "top", "via": [[630, 110], [630, 290]] },
+    { "from": "seed", "to": "snat", "label": "回源出网", "fromSide": "left", "toSide": "right" },
+    { "from": "space-cce", "to": "peer-cce", "label": "就近代理（Local）", "variant": "emphasis", "labelAt": [1025, 154] },
+    { "from": "peer-cce", "to": "scheduler", "label": "任务调度", "fromSide": "left", "toSide": "bottom", "via": [[710, 320], [710, 360], [360, 360]], "labelAt": [710, 374] },
+    { "from": "peer-cce", "to": "seed", "label": "P2P 分片（NodePort）", "fromSide": "bottom", "toSide": "top", "via": [[1025, 470], [360, 470]] },
+    { "from": "peer-cci", "to": "seed", "label": "P2P 分片（ELB）", "fromSide": "bottom", "toSide": "bottom", "via": [[1290, 620], [360, 620]] },
+    { "from": "space-cci", "to": "peer-cci", "label": "负载均衡（统一 Service）", "variant": "emphasis", "labelAt": [1290, 154] },
+    { "from": "peer-cce", "to": "peer-cci", "label": "P2P 互通", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "管理面高可用", "items": ["管理组件 ×2 部署于独立子网，ELB 前置，SNAT 独立出网", "MySQL / Redis 托管实例，白名单 + 认证"] },
+    { "dot": "emerald", "title": "数据面分场景", "items": ["CCE：DaemonSet 每节点 Peer，Local Service 就近代理", "CCI：5 实例独立 PVC + 统一 Service + 每实例 ELB 打通跨集群 P2P"] }
+  ]
+}

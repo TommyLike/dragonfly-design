@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "预热时序（Preheat）",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [1390, 660]
+  },
+  "participants": [
+    { "id": "mgmt", "type": "external", "label": "管理集群" },
+    { "id": "gitea", "type": "backend", "label": "Gitea" },
+    { "id": "manager", "type": "backend", "label": "Manager" },
+    { "id": "scheduler", "type": "backend", "label": "Scheduler" },
+    { "id": "seed", "type": "backend", "label": "Seed Peer" },
+    { "id": "space", "type": "backend", "label": "Space Pod" }
+  ],
+  "segments": [
+    { "from": 160, "to": 226, "label": "获取直链清单" },
+    { "from": 236, "to": 316, "label": "触发预热" },
+    { "from": 326, "to": 456, "label": "首次下载即加速" }
+  ],
+  "messages": [
+    { "from": "mgmt", "to": "gitea", "y": 180, "label": "GET /objects/urls（仓库鉴权）", "variant": "emphasis" },
+    { "from": "gitea", "to": "mgmt", "y": 210, "label": "对象直链清单（CDN URL）", "variant": "return" },
+    { "from": "mgmt", "to": "manager", "y": 240, "label": "POST Preheat（Repository 更新触发）", "variant": "emphasis" },
+    { "from": "manager", "to": "scheduler", "y": 270, "label": "下发预热任务", "variant": "emphasis" },
+    { "from": "scheduler", "to": "seed", "y": 300, "label": "调度回源缓存任务", "variant": "emphasis", "note": "Seed Peer 按直链清单回源 CDN 下载并缓存" },
+    { "from": "seed", "to": "scheduler", "y": 330, "label": "任务完成上报" },
+    { "from": "scheduler", "to": "manager", "y": 360, "label": "预热状态更新", "variant": "dashed" },
+    { "from": "mgmt", "to": "space", "y": 390, "label": "仓库更新发布" },
+    { "from": "space", "to": "seed", "y": 420, "label": "业务首次下载（命中预热缓存）", "variant": "emphasis" }
+  ],
+  "activations": [
+    { "participant": "gitea", "from": 174, "to": 216, "type": "backend" },
+    { "participant": "mgmt", "from": 174, "to": 246, "type": "external" },
+    { "participant": "manager", "from": 234, "to": 366, "type": "backend" },
+    { "participant": "scheduler", "from": 264, "to": 366, "type": "backend" },
+    { "participant": "seed", "from": 294, "to": 336, "type": "backend" },
+    { "participant": "mgmt", "from": 384, "to": 396, "type": "external" },
+    { "participant": "space", "from": 384, "to": 430, "type": "backend" },
+    { "participant": "seed", "from": 414, "to": 430, "type": "backend" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "发布即缓存", "items": ["模型发布后由管理集群触发预热，业务首次下载即命中", "直链清单复用 Gitea 仓库鉴权，预热组件不持有存储凭据"] },
+    { "dot": "amber", "title": "已知限制", "items": ["Dragonfly 当前不持久化预热任务信息", "预热任务对账与重放能力待补（见风险清单）"] }
+  ]
+}
