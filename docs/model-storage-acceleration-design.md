@@ -406,6 +406,8 @@ Gitea 原生支持 LFS（client/server 均自实现），但有明显局限：
 - 步骤 6 的分片 PUT 全部直传 OBS（ADR-2），Gitea 只承载 batch/verify 控制面流量；
 - 步骤 8 的 verify 即 commit（ADR-3），服务端合并后校验大小并写元数据。
 
+> 📖 **延伸阅读**：[分片上传深度解析：从 git push 到华为云 OBS](multipart-upload-deep-dive.md) —— 以一次真实的 20GB 模型 push 为线索，逐环节拆解上传链路的组件与关键考量点。
+
 ### 6.2 集群内 P2P 下载时序
 
 <div align="center">
