@@ -55,12 +55,50 @@
 *.bin filter=lfs diff=lfs merge=lfs -text
 ```
 
+**注册了什么**：`.gitattributes` 的四个属性对应 git 的**三个扩展点 + 一个钩子**，由 `git lfs install` 写入 git 配置并挂接：
+
+```
+[filter "lfs"]     # 过滤器对：指针 ↔ 真实内容的转换
+    clean = git-lfs clean -- %f
+    smudge = git-lfs smudge -- %f
+    required = true
+[diff "lfs"]       # diff 驱动：二进制内容先转可读文本再比较
+    textconv = git-lfs textconv
+[merge "lfs"]      # merge 驱动：二进制冲突不按文本三路合并
+    driver = git-lfs merge %O %A %B
+# + .git/hooks/pre-push → git lfs pre-push
+```
+
+**工作机制**：
+
+- **`filter=lfs`（clean/smudge 过滤器对）**——git 以 **STDIN → STDOUT** 方式调用这对程序，实现"指针 ↔ 真实内容"的双向转换：
+  - **clean（工作区 → 暂存区）**：`git add` 时触发。git 把文件内容交给 `git-lfs clean`，后者边读边算 SHA-256、把实体存进本地对象库 `.git/lfs/objects/{oid}`，STDOUT 只输出**指针文件**（version/oid/size 三行）——**进入 index 的是指针，不是 20GB 实体**；
+  - **smudge（暂存区 → 工作区）**：`git checkout`/`clone`/`switch`/`reset --hard` 时触发。git 把仓库里的指针交给 `git-lfs smudge`，后者查本地对象库，没有就向远端发 batch download 拉取，STDOUT 输出真实字节写回工作区；
+  - （git 2.11+ 的 `filter-process` 长驻进程协议是同一机制的性能优化，避免每次调用都起进程）；
+- **`diff=lfs`**：`git diff` 时先经 `textconv` 把二进制转成可读的指针信息（oid/size）再比较，避免 diff 输出二进制乱码（也可配置为对实体内容做 diff）；
+- **`merge=lfs`**：分支合并遇到同一 LFS 文件两边都改过时，不按文本三路合并二进制，而是调 git-lfs 的 merge driver 决定结果（策略可用选项控制，如 ours/theirs），避免合出损坏文件；
+- **`-text`**：声明文件是二进制，git 不做行尾转换（CRLF 等），也不按文本方式处理；
+- **pre-push 钩子**：`git push` 时 git 先调 `git lfs pre-push`（本地 ref/远端 ref 经 STDIN 传入），git-lfs 比较两端 commit 差异、收集本次 push 涉及的全部 LFS 指针，把对应实体走 batch API 上传（即 ④~⑧ 的 multipart 流程）；上传失败钩子退出非 0，**push 整体中止**。
+
+**git 生命周期 × 扩展点的触发关系**：
+
+| git 操作 | 触发的扩展点 | 方向 | 行为 |
+|---|---|---|---|
+| `git add` | clean 过滤器 | 工作区 → 暂存区 | 大文件落本地对象库，指针进 index |
+| `git commit` | —（不触发任何扩展点） | — | 仅快照 index（此时 index 里已是指针） |
+| `git push` | pre-push 钩子 | 本地 → 远端 | 收集指针 → batch API → 实体上传 OBS |
+| `git checkout` / `clone` | smudge 过滤器 | 暂存区 → 工作区 | 指针 → 实体还原（本地缺失先下载） |
+| `git diff` | diff 驱动（textconv） | — | 二进制转可读文本再比较 |
+| `git merge` | merge 驱动 | — | 二进制冲突不按文本合并 |
+
 **组件**：git client + git-lfs client。
 
 **关键考量点**：
 
-- **配置即选路**：`.gitattributes` 决定哪些文件走 LFS 通道——`-text` 同时禁用了 git 对二进制文件的 diff 处理，避免大文件污染仓库历史；
-- **零修改的根基**：后续全部能力（指针替换、pre-push 上传）都挂接在 git 既有的 filter/hook 扩展点上，这是"不改官方 client"的前提。
+- **配置即选路**：`.gitattributes` 决定哪些文件走 LFS 通道（`filter=lfs` 命中即生效，未命中的文件 git 行为完全不变）；
+- **零修改的根基**：全部能力（指针替换、diff/merge、上传）都挂接在 git 既有的 filter driver / hook 扩展点上，这是"不改官方 client"的前提；
+- **commit 不触发过滤器**（常见误解）：clean 的触发点是 `git add`，`git commit` 只是快照 index——所以仓库历史里永远只有指针，大文件实体存在于本地对象库与远端 OBS；
+- **push 的原子性**：实体上传是 push 的一部分，失败即中止，不会出现"指针已在远端、数据缺失"的半成品仓库。
 
 ### ② 本地暂存（git add）
 
@@ -195,7 +233,7 @@ Gitea 侧 `MultiPartVerifyHandler` → `CommitUpload` → `CompleteMultipartUplo
 
 | 环节 | 关键考量点 | 对应实现/配置 |
 |---|---|---|
-| ① 协议配置 | 配置即选路；扩展点挂接（零修改 client 的前提） | `.gitattributes`、filter/hook |
+| ① 协议配置 | 配置即选路；clean/smudge 过滤器对做指针↔内容转换；diff/merge 驱动避免 git 按文本处理二进制；pre-push 钩子保证 push 原子性；commit 不触发过滤器 | `.gitattributes`、filter/diff/merge 驱动、pre-push 钩子 |
 | ② 本地暂存 | 内容寻址（oid=sha256）；本地对象库为上传读取源 | clean 过滤器 |
 | ③ 推送触发 | 原子性（对象失败则 push 中止）；批量收集 | pre-push 钩子 |
 | ④ Batch 协商 | 双通道兼容分流；对象级去重；单一协议锚点 | `BatchHandlerAdapter`、`PointersExists` |
