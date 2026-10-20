@@ -132,6 +132,8 @@
 - **commit 不触发过滤器**（常见误解）：clean 的触发点是 `git add`，`git commit` 只是快照 index——所以仓库历史里永远只有指针，大文件实体存在于本地对象库与远端 OBS；
 - **push 的原子性**：实体上传是 push 的一部分，失败即中止，不会出现"指针已在远端、数据缺失"的半成品仓库。
 
+> 📖 **延伸阅读**：[Git Client 侧深度解析：从 .gitattributes 到后端 API](git-client-deep-dive.md) —— 站在 git 本体机制（filter driver 协议、hook 协议、attributes 语义）上展开，含客户端与后端 API 的完整交互时序。
+
 ### ② 本地暂存（git add）
 
 **做什么**：clean 过滤器拦截待暂存的文件内容：
