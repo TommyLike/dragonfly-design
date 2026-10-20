@@ -21,6 +21,7 @@
 | 04 预热时序 | <https://whimsical.com/7QRsY6z1R7smVPPVowztvz> |
 | 05 生产部署拓扑 | <https://whimsical.com/2GtouQzSR6ZMLAiJVc7LLY> |
 | 06 分片上传全链路（git push → OBS） | <https://whimsical.com/98uDharcatoKyG3ELkrZAw> |
+| 07 四个自动的机制归属 | <https://whimsical.com/qH4xLdMwtYQM8MJRqenHC> |
 
 ## 关联仓库
 

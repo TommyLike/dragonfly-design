@@ -22,6 +22,11 @@
 
 用户视角只有一句话——**"我什么都没做，只是 `git push` 了一下"**。hook、上传、分片、重传全是自动的。本节回答：每一层"自动"由谁提供、我们补了什么设计。第 5 节的 ①~⑨ 环节是这四个"自动"的流程展开。
 
+<div align="center">
+<iframe src="https://whimsical.com/embed/qH4xLdMwtYQM8MJRqenHC" width="100%" height="300" style="border:none;border-radius:8px;" frameborder="0"></iframe>
+<p><em>图：四个"自动"的机制归属（Whimsical 交互图：点击打开 <a href="https://whimsical.com/qH4xLdMwtYQM8MJRqenHC">Whimsical 在线版</a> 可编辑；GitHub 等不支持 iframe 的平台请直接点击链接）</em></p>
+</div>
+
 | 用户看到的 | 谁提供的 | 我们补的设计 |
 |---|---|---|
 | **自动 hook** | 上游：`git lfs install` 注册 pre-push 钩子 + clean/smudge 过滤器对 | 一个决策：**选择依赖官方 client 机制**，而非 HuggingFace 的 custom-transfer 路线（后者要求用户每个仓库执行 `lfs-enable-largefiles`，做不到零安装） |
