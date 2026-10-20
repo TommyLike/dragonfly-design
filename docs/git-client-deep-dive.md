@@ -104,6 +104,34 @@ git-lfs 的 pre-push 实现（`git lfs pre-push`）：
 <p><em>图：上传 API 交互时序（Whimsical 交互图：点击打开 <a href="https://whimsical.com/mmMHWpYZ3VunAxsh7iABi">Whimsical 在线版</a> 可编辑；GitHub 等不支持 iframe 的平台请直接点击链接）</em></p>
 </div>
 
+**文本示意（mermaid，GitHub 原生渲染）**：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Git Client
+    participant G as Gitea
+    participant O as OBS
+    participant M as MySQL
+    C->>G: POST /objects/batch<br/>{operation: upload, transfers: [basic, multipart]}
+    G->>O: ListMultipartUploads（按对象 key 查任务）
+    alt 已有未完成任务
+        G->>O: ListParts（取已传分片）
+    else 无任务
+        G->>O: InitiateMultipartUpload
+    end
+    O-->>G: uploadId + 已传分片 etag
+    G-->>C: 200 {transfer: multipart, parts[], verify, abort}
+    C->>O: 并行 PUT 各分片（签名 URL 直传 · 跳过已传分片）
+    C->>G: POST multipart-verify?oid&size<br/>{upload_id, part_ids[{etag, part_id}]}
+    G->>O: CompleteMultipartUpload（携带每段 etag 合并）
+    O-->>G: 合并完成
+    G->>O: Stat 校验 size
+    G->>M: 写入 LFSMetaObject
+    G-->>C: 200 OK → pre-push 退出 0 → git 推 refs
+    Note over C,G: 失败可选：DELETE multipart-abort → AbortMultipartUpload
+```
+
 **关键点**：
 
 - 客户端对后端的调用只有 **3 个 HTTP 端点**：batch（协商）、multipart-verify（合并校验）、multipart-abort（可选取消）——其余全部是客户端与 OBS 之间的签名 URL 直传；
@@ -114,13 +142,21 @@ git-lfs 的 pre-push 实现（`git lfs pre-push`）：
 
 下载的协议交互比上传简单（multipart 模式中 download 动作与 basic 一致，不返回 parts）：
 
-```
-Git Client → Gitea : POST /objects/batch {operation: download, objects: [{oid, size}]}
-Gitea     → Client : 200 {transfer: multipart,
-                          actions: {download: {href: <CDN 签名 URL>}}}   # 见主文档 ADR-4
-Client    → CDN    : GET <签名 URL>（按需 Range 分段并发；支持断点续传）
-CDN       → OBS    : 未命中时回源（保留 OBS 签名参数 → 源站鉴权通过）
-Client    ← 收到对象字节，smudge 写回工作区
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Git Client
+    participant G as Gitea
+    participant D as CDN
+    participant O as OBS
+    C->>G: POST /objects/batch<br/>{operation: download, objects: [{oid, size}]}
+    G-->>C: 200 {transfer: multipart,<br/>actions: {download: {href: CDN 签名 URL}}}   （ADR-4）
+    C->>D: GET 对象（Range 分段并发 · 支持断点续传）
+    alt 缓存未命中
+        D->>O: 回源（保留 OBS 签名参数 → 源站鉴权通过）
+        O-->>D: 对象数据
+    end
+    D-->>C: 分片数据 → smudge 写回工作区
 ```
 
 下载侧的三个设计点（详见主文档 [ADR-4](model-storage-acceleration-design.md)、[ADR-9](model-storage-acceleration-design.md)）：
