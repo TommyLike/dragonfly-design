@@ -18,7 +18,34 @@
 
 本文沿这条链路拆解：每一环**做什么、涉及哪些组件、关键设计考量是什么**。
 
-## 2. 全链路总览
+## 2. 四个"自动"的机制归属（能力视角）
+
+用户视角只有一句话——**"我什么都没做，只是 `git push` 了一下"**。hook、上传、分片、重传全是自动的。本节回答：每一层"自动"由谁提供、我们补了什么设计。第 5 节的 ①~⑨ 环节是这四个"自动"的流程展开。
+
+| 用户看到的 | 谁提供的 | 我们补的设计 |
+|---|---|---|
+| **自动 hook** | 上游：`git lfs install` 注册 pre-push 钩子 + clean/smudge 过滤器对 | 一个决策：**选择依赖官方 client 机制**，而非 HuggingFace 的 custom-transfer 路线（后者要求用户每个仓库执行 `lfs-enable-largefiles`，做不到零安装） |
+| **自动上传** | 上游：pre-push 钩子收集指针 → 发起 batch 请求 | **multipart 协议扩展**（ADR-1）：服务端返回 `parts[]` / `verify` / `abort` 三个动作的指引，客户端照做即可——上传决策权在服务端 |
+| **自动分片** | 无（basic 模式是单连接整传） | **ADR-2**：服务端固定 20MB/片 + 每片签名 PUT URL + 大小阈值策略（<100MB 回退 basic，>5GB 强制 multipart） |
+| **自动重传** | 无（basic 模式中断即全量重传） | **ADR-3**：状态外置到 OBS multipart 任务 → batch 幂等协商 → 已传且 size 匹配的分片返回 etag → 客户端自动跳过 |
+
+三处最有"设计味"的点：
+
+**① 自动重传是幂等协商的涌现，不是"断点续传功能"（题眼）**
+
+触发链：网络失败 → 客户端重试 batch（协议天然幂等，客户端无任何状态）→ Gitea `ListParts` 查已传 → 只返回未完成分片 → 客户端只补缺失部分。全链路没有新增任何"续传状态"——重传能力从"每次协商都问一遍任务状态"里自然涌现，这正是第 7 节"状态外置"范式的核心。
+
+**② "自动" = 服务端决策、客户端执行——零修改 client 的根本原因**
+
+分片多大、是否分段、哪些片已传，全部由 Gitea 在 batch 响应里决定；官方 client 不需要知道任何新知识，只是忠实地执行协议返回的动作。所有复杂度被收敛到服务端——这是"零安装、零修改"的前提，也是我们和 HuggingFace 路线的分野。
+
+**③ 与 HuggingFace 路线的对比：复杂度推给客户端 vs 收敛到服务端**
+
+同样是解决 >5GB：HF 让用户安装 custom transfer agent（`lfs-enable-largefiles` + `lfs-multipart-upload`，每个仓库都要执行一次，换来更小的响应体积）；我们扩展服务端协议，官方 client 直接可用，换来标准兼容与零安装。
+
+---
+
+## 3. 全链路总览
 
 <div align="center">
 <a href="https://whimsical.com/98uDharcatoKyG3ELkrZAw"><img src="../images/whimsical/06-upload-flow.png" width="92%"></a>
@@ -32,7 +59,7 @@
 - 红色边是关键数据路径：分片 PUT 直传（⑥→OBS）与合并（⑦→OBS）；
 - 断点续传发生在⑤：Gitea 每次协商都问 OBS"已经传了哪些分片"，客户端跳过。
 
-## 3. 组件清单
+## 4. 组件清单
 
 | 组件 | 归属 | 职责 |
 |---|---|---|
@@ -45,7 +72,7 @@
 | OBS multipart 任务 | 华为云 | `InitiateMultipartUpload` / `ListMultipartUploads` / `ListParts` / `CompleteMultipartUpload` / `AbortMultipartUpload` |
 | `LFSMetaObject`（MySQL） | Gitea | 对象与仓库的关联元数据（oid、size、repo） |
 
-## 4. 逐环节拆解
+## 5. 逐环节拆解
 
 ### ① 协议配置（一次性）
 
@@ -229,7 +256,7 @@ Gitea 侧 `MultiPartVerifyHandler` → `CommitUpload` → `CompleteMultipartUplo
 - **防止"孤儿分片"**：不取消的话未完成任务的分片会永久占存储计费；⑤ 的"多个脏任务全 abort"策略也是同一治理逻辑；
 - **服务端兜底**：即使客户端不调用，下一次协商（⑤）也会清理多余任务，协议自带自愈。
 
-## 5. 关键考量点汇总
+## 6. 关键考量点汇总
 
 | 环节 | 关键考量点 | 对应实现/配置 |
 |---|---|---|
@@ -243,7 +270,7 @@ Gitea 侧 `MultiPartVerifyHandler` → `CommitUpload` → `CompleteMultipartUplo
 | ⑧ 元数据入库 | 元数据与数据分离；入库失败靠幂等重试 | `LFSMetaObject` |
 | ⑨ 失败取消 | 防孤儿分片；协议自愈（下次协商自动清理） | `AbortMultipartUpload` |
 
-## 6. 可迁移的设计范式
+## 7. 可迁移的设计范式
 
 1. **状态外置（state externalization）**：无状态服务 + 有状态平台能力（对象存储的 multipart 任务）——把"进度"这种有状态信息交给平台的原生状态机，服务端保持可水平扩展，续传/恢复能力从幂等协商中自然涌现。适用于一切"客户端直传 + 大文件"场景（视频上传、安装包分发、数据集同步）；
 2. **内容寻址贯穿**：oid 即内容指纹，去重、幂等、跨仓库复用全部免费获得；
